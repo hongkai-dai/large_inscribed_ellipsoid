@@ -130,7 +130,7 @@ def find_ellipsoid(outside_pts, inside_pts, A, b):
         return None, None, None, None
 
 
-def draw_ellipsoid(P, q, r, outside_pts, inside_pts):
+def draw_ellipsoid(P, q, r, outside_pts, inside_pts, title=None):
     """
     Draw an ellipsoid defined as {x | xᵀPx + 2qᵀx ≤ r }
     This ellipsoid is equivalent to
@@ -151,8 +151,12 @@ def draw_ellipsoid(P, q, r, outside_pts, inside_pts):
         ax.plot(ellipsoid_pts[0, :], ellipsoid_pts[1, :], c='blue')
 
         ax.scatter(outside_pts[:, 0], outside_pts[:, 1], c='red')
-        ax.scatter(inside_pts[:, 0], inside_pts[:, 1], s=20, c='green')
+        if inside_pts is not None:
+            ax.scatter(inside_pts[:, 0], inside_pts[:, 1], s=20, c='green')
         ax.axis('equal')
+        if title is not None:
+            ax.set_title(title)
+        plt.savefig(f"/home/hongkaidai/large_inscribed_ellipsoid/figures/run4/{title}.png")
         plt.show()
     if dim == 3:
         u = np.linspace(0, np.pi, 30)
@@ -176,6 +180,8 @@ def draw_ellipsoid(P, q, r, outside_pts, inside_pts):
         ax.scatter(inside_pts[:, 0], inside_pts[:, 1], inside_pts[:, 2], s=20,
                    c='green')
         ax.axis('equal')
+        if title is not None:
+            ax.set_title(title)
         plt.show()
 
 
@@ -230,6 +236,8 @@ def find_large_ellipsoid(pts, max_iterations):
             outside_pts = np.vstack((outside_pts, inside_pts[-1, :]))
             inside_pts = inside_pts[:-1, :]
 
+        draw_ellipsoid(P_best, q_best, r_best, outside_pts, inside_pts, f"iter={num_iter+1}")
+        draw_ellipsoid(P_best, q_best, r_best, outside_pts[:5,:], None, f"iter_{num_iter+1}")
         # Now take a new sample that is outside of the ellipsoid.
         sample_pts = uniform_sample_from_convex_hull(deln, dim, 20)
         is_in_ellipsoid = np.sum(sample_pts.T*(P_best @ sample_pts.T), axis=0)\
