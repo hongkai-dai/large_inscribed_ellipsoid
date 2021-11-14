@@ -205,7 +205,7 @@ def find_large_ellipsoid(pts, max_iterations):
     dim = pts.shape[1]
     A, b, hull = get_hull(pts)
     hull_vertices = pts[hull.vertices]
-    deln = pts[Delaunay(hull_vertices).simplices]
+    deln = hull_vertices[Delaunay(hull_vertices).simplices]
 
     outside_pts = pts
     z = centered_sample_from_convex_hull(pts)
@@ -243,4 +243,4 @@ def find_large_ellipsoid(pts, max_iterations):
                 inside_pts, sample_pts[np.where(~is_in_ellipsoid)[0][0], :]))
             num_iter += 1
 
-    return P_best, q_best, r_best
+    return P_best, q_best, r_best, outside_pts, inside_pts
