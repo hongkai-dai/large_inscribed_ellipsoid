@@ -179,7 +179,7 @@ def draw_ellipsoid(P, q, r, outside_pts, inside_pts):
         plt.show()
 
 
-def find_large_ellipsoid(pts, max_iterations):
+def find_large_ellipsoid(pts, max_iterations, volume_increase_tol):
     """
     We find a large ellipsoid within the convex hull of @p pts but not
     containing any point in @p pts.
@@ -199,9 +199,13 @@ def find_large_ellipsoid(pts, max_iterations):
     @param pts pts[i, :] is the i'th points that has to be outside of the
     ellipsoid.
     @param max_iterations The iterations limit.
-    @return (P, q, r) The largest ellipsoid is parameterized as
-    {x | xᵀPx + 2qᵀx ≤ r }
+    @param volume_increase_tol If the increase of the ellipsoid volume is
+    no larger than this threshold, then stop.
+    @return (P, q, r, inside_pts, outside_pts) The largest ellipsoid is
+    parameterized as {x | xᵀPx + 2qᵀx ≤ r }
     """
+    assert (isinstance(volume_increase_tol, float))
+    assert (volume_increase_tol >= 0)
     dim = pts.shape[1]
     A, b, hull = get_hull(pts)
     hull_vertices = pts[hull.vertices]
@@ -218,15 +222,19 @@ def find_large_ellipsoid(pts, max_iterations):
         if P is not None:
             volume = compute_ellipsoid_volume(P, q, r)
             if volume > max_ellipsoid_volume:
-                max_ellipsoid_volume = volume
                 P_best = P
                 q_best = q
                 r_best = r
+                if (volume - max_ellipsoid_volume <= volume_increase_tol):
+                    return P_best, q_best, r_best, inside_pts, outside_pts
+                max_ellipsoid_volume = volume
             else:
                 # Adding the last inside_pts doesn't increase the ellipsoid
                 # volume, so remove it.
                 inside_pts = inside_pts[:-1, :]
         else:
+            # Cannot contain inside_pts[-1, :], remove it from inside_pts and
+            # add it to the outside_pts
             outside_pts = np.vstack((outside_pts, inside_pts[-1, :]))
             inside_pts = inside_pts[:-1, :]
 
@@ -239,8 +247,10 @@ def find_large_ellipsoid(pts, max_iterations):
             # already large enough.
             return P_best, q_best, r_best, outside_pts, inside_pts
         else:
-            inside_pts = np.vstack((
-                inside_pts, sample_pts[np.where(~is_in_ellipsoid)[0][0], :]))
             num_iter += 1
+            if num_iter < max_iterations:
+                inside_pts = np.vstack((
+                    inside_pts,
+                    sample_pts[np.where(~is_in_ellipsoid)[0][0], :]))
 
     return P_best, q_best, r_best, outside_pts, inside_pts
