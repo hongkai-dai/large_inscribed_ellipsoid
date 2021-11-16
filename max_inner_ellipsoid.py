@@ -237,7 +237,7 @@ def find_large_ellipsoid(pts, max_iterations):
         if np.all(is_in_ellipsoid):
             # All the sampled points are in the ellipsoid, the ellipsoid is
             # already large enough.
-            return P_best, q_best, r_best
+            return P_best, q_best, r_best, outside_pts, inside_pts
         else:
             inside_pts = np.vstack((
                 inside_pts, sample_pts[np.where(~is_in_ellipsoid)[0][0], :]))
