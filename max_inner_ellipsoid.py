@@ -116,7 +116,7 @@ def find_ellipsoid(outside_pts, inside_pts, A, b):
 
     prob = cp.Problem(cp.Minimize(0), constraints)
     try:
-        prob.solve(verbose=False)
+        prob.solve(verbose=True)
     except cp.error.SolverError:
         return None, None, None, None
 
@@ -179,6 +179,144 @@ def draw_ellipsoid(P, q, r, outside_pts, inside_pts):
         plt.show()
 
 
+def inside_ellipsoid(pts, P, q, r):
+    """
+    For a batch of points, determine if they are inside the ellipsoid
+    {x | xᵀPx + 2qᵀx ≤ r }
+
+    Args:
+      pts: pts is of size num_points x dim.
+
+    Return:
+      flag: flag is a numpy array of size num_points, where flag[i] is true if
+      and only if pts[i] is inside the ellipsoid.
+    """
+    return np.sum(pts.T * (P @ pts.T), axis=0) + 2 * pts @ q <= r
+
+
+class FindLargeEllipsoid:
+    """
+    We find a large ellipsoid within the convex hull of @p pts but not
+    containing any point in @p pts.
+    The algorithm proceeds iteratively
+    1. Start with outside_pts = pts, inside_pts = z where z is a random point
+       in the convex hull of @p outside_pts.
+    2. while num_iter < max_iterations
+    3.   Solve an SDP to find an ellipsoid that is within the convex hull of
+         @p pts, not containing any outside_pts, but contains all inside_pts.
+    4.   If the SDP in the previous step is infeasible, then remove z from
+         inside_pts, and append it to the outside_pts.
+    5.   Randomly sample a point in the convex hull of @p pts, if this point is
+         outside of the current ellipsoid, then append it to inside_pts.
+    6.   num_iter += 1
+    When the iterations limit is reached, we report the ellipsoid with the
+    maximal volume.
+    @param pts pts[i, :] is the i'th points that has to be outside of the
+    ellipsoid.
+    @param max_iterations The iterations limit.
+    @param volume_increase_tol If the increase of the ellipsoid volume is
+    no larger than this threshold, then stop.
+    @return (P, q, r, inside_pts, outside_pts) The largest ellipsoid is
+    parameterized as {x | xᵀPx + 2qᵀx ≤ r }
+    """
+    def __init__(self, pts):
+        self.pts = pts
+        self.dim = self.pts.shape[1]
+        self.A, self.b, self.hull = get_hull(self.pts)
+        hull_vertices = pts[self.hull.vertices]
+        self.deln = hull_vertices[Delaunay(hull_vertices).simplices]
+        # In each iteration, we randomly sample num_sample_pts inside the
+        # convex hull self.hull. If all these sample points are inside the
+        # ellipsoid, then we think the ellispoid is large enough, and
+        # terminate the search.
+        self.num_sample_pts = 20
+
+    def search(self, max_iterations, volume_increase_tol):
+        """
+        Search the ellipsoid until either hitting the max_iterations, or the
+        increase in the volume is smaller than volume_increase_tol.
+
+        Return:
+          P, q, r: The best ellipsoid found as {x | xᵀPx + 2qᵀx ≤ r}
+          outside_pts, inside_pts: The points discovered during the search
+          process. inside_pts are all inside the ellipsoid, outside_pts are
+          all outside the ellipsoid.
+        """
+        # Grow the ellipsoid from a point sampled in the center of the convex
+        # hull.
+        candidate_pt = centered_sample_from_convex_hull(self.pts)
+        inside_pts = candidate_pt.reshape((1, -1))
+        P, q, r, lambda_val = find_ellipsoid(self.pts, inside_pts, self.A,
+                                             self.b)
+        if P is None:
+            raise Exception("Failed in the first iteration. Check which " +
+                            "solver is used. I highly recommend installing" +
+                            " Mosek solver, as the default solver (SCS) " +
+                            "coming with CVXPY often fails due to " +
+                            "numerical issues.")
+        return self.search_from(
+            P, q, r, self.pts, inside_pts, max_iterations-1,
+            volume_increase_tol)
+
+    def search_from(self, P, q, r, outside_pts, inside_pts, max_iterations,
+                    volume_increase_tol):
+        """
+        Start the search from an initial ellipsoid xᵀPx + 2qᵀx ≤ r, where
+        inside_pts are all inside xᵀPx + 2qᵀx ≤ r, outside_pts are all outside
+        xᵀPx + 2qᵀx ≤ r.
+        A typical use of this function is that after calling search() and get
+        the returned results, you still want to improve the returned results;
+        then you can pass that result as the input P, q, r, inside_pts,
+        outside_pts to this function.
+
+        Args:
+          inside_pts it contains the points inside the input ellipsoid.
+          outide_pts it contains the points outside the input ellipsoid.
+        """
+        assert (np.all(inside_ellipsoid(inside_pts, P, q, r)))
+        assert (not np.any(inside_ellipsoid(outside_pts, P, q, r)))
+
+        num_iter = 0
+        max_ellipsoid_volume = compute_ellipsoid_volume(P, q, r)
+        P_best = P
+        q_best = q
+        r_best = r
+        while num_iter < max_iterations:
+            # Now take a new sample that is outside of the ellipsoid.
+            sample_pts = uniform_sample_from_convex_hull(
+                self.deln, self.dim, self.num_sample_pts)
+            is_in_ellipsoid = inside_ellipsoid(
+                sample_pts, P_best, q_best, r_best)
+            if np.all(is_in_ellipsoid):
+                return P_best, q_best, r_best, outside_pts, inside_pts
+            else:
+                # candidate_pt is the point outside of the current best
+                # ellipsoid. Check if we can find a new ellipsoid that covers
+                # inside_pts and z.
+                candidate_pt = sample_pts[np.where(~is_in_ellipsoid)[0][0], :]
+                P, q, r, lambda_val = find_ellipsoid(
+                    outside_pts, np.vstack((inside_pts, candidate_pt)),
+                    self.A, self.b)
+                if P is None:
+                    # Cannot find the ellipsoid that covers both inside_pts
+                    # and candidate_pt. Add candidate_pt to outside_pts.
+                    outside_pts = np.vstack((outside_pts, candidate_pt))
+                else:
+                    volume = compute_ellipsoid_volume(P, q, r)
+                    if volume > max_ellipsoid_volume:
+                        P_best = P
+                        q_best = q
+                        r_best = r
+                        if volume - max_ellipsoid_volume <= \
+                                volume_increase_tol:
+                            return P_best, q_best, r_best, inside_pts,\
+                                outside_pts
+                        max_ellipsoid_volume = volume
+                        inside_pts = np.vstack((inside_pts, candidate_pt))
+                num_iter += 1
+        return P_best, q_best, r_best, outside_pts, inside_pts
+
+
 def find_large_ellipsoid(pts, max_iterations, volume_increase_tol):
     """
     We find a large ellipsoid within the convex hull of @p pts but not
@@ -204,53 +342,6 @@ def find_large_ellipsoid(pts, max_iterations, volume_increase_tol):
     @return (P, q, r, inside_pts, outside_pts) The largest ellipsoid is
     parameterized as {x | xᵀPx + 2qᵀx ≤ r }
     """
-    assert (isinstance(volume_increase_tol, float))
-    assert (volume_increase_tol >= 0)
-    dim = pts.shape[1]
-    A, b, hull = get_hull(pts)
-    hull_vertices = pts[hull.vertices]
-    deln = hull_vertices[Delaunay(hull_vertices).simplices]
-
-    outside_pts = pts
-    z = centered_sample_from_convex_hull(pts)
-    inside_pts = z.reshape((1, -1))
-
-    num_iter = 0
-    max_ellipsoid_volume = -np.inf
-    while num_iter < max_iterations:
-        (P, q, r, lambda_val) = find_ellipsoid(outside_pts, inside_pts, A, b)
-        if P is not None:
-            volume = compute_ellipsoid_volume(P, q, r)
-            if volume > max_ellipsoid_volume:
-                P_best = P
-                q_best = q
-                r_best = r
-                if (volume - max_ellipsoid_volume <= volume_increase_tol):
-                    return P_best, q_best, r_best, inside_pts, outside_pts
-                max_ellipsoid_volume = volume
-            else:
-                # Adding the last inside_pts doesn't increase the ellipsoid
-                # volume, so remove it.
-                inside_pts = inside_pts[:-1, :]
-        else:
-            # Cannot contain inside_pts[-1, :], remove it from inside_pts and
-            # add it to the outside_pts
-            outside_pts = np.vstack((outside_pts, inside_pts[-1, :]))
-            inside_pts = inside_pts[:-1, :]
-
-        # Now take a new sample that is outside of the ellipsoid.
-        sample_pts = uniform_sample_from_convex_hull(deln, dim, 20)
-        is_in_ellipsoid = np.sum(sample_pts.T*(P_best @ sample_pts.T), axis=0)\
-            + 2 * sample_pts @ q_best <= r_best
-        if np.all(is_in_ellipsoid):
-            # All the sampled points are in the ellipsoid, the ellipsoid is
-            # already large enough.
-            return P_best, q_best, r_best, outside_pts, inside_pts
-        else:
-            num_iter += 1
-            if num_iter < max_iterations:
-                inside_pts = np.vstack((
-                    inside_pts,
-                    sample_pts[np.where(~is_in_ellipsoid)[0][0], :]))
-
-    return P_best, q_best, r_best, outside_pts, inside_pts
+    raise Warning("This function is deprecated, please use " +
+                  "FindLargeEllpsoid class using its method search()")
+    return FindLargeEllipsoid(pts).search(max_iterations, volume_increase_tol)
