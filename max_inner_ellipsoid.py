@@ -18,11 +18,11 @@ def get_hull(pts):
 def compute_ellipsoid_volume(P, q, r):
     """
     The volume of the ellipsoid xᵀPx + 2qᵀx ≤ r is proportional to
-    r + qᵀP⁻¹q / power(det(P), 1/dim)
+    power((r + qᵀP⁻¹q)/ det(P)), dim/2)
     We return this number.
     """
-    return (r + q @ np.linalg.solve(P, q)) / \
-        np.power(np.linalg.det(P), 1. / P.shape[0])
+    return np.power((r + q @ np.linalg.solve(P, q)) / \
+        np.linalg.det(P), P.shape[0] / 2)
 
 
 def uniform_sample_from_convex_hull(deln, dim, n):
@@ -54,7 +54,7 @@ def centered_sample_from_convex_hull(pts):
     return z
 
 
-def find_ellipsoid(outside_pts, inside_pts, A, b):
+def find_ellipsoid(outside_pts, inside_pts, A, b, *, verbose=False):
     """
     For a given sets of points v₁, ..., vₙ, find the ellipsoid satisfying
     three constraints:
@@ -116,7 +116,7 @@ def find_ellipsoid(outside_pts, inside_pts, A, b):
 
     prob = cp.Problem(cp.Minimize(0), constraints)
     try:
-        prob.solve(verbose=True)
+        prob.solve(verbose=verbose)
     except cp.error.SolverError:
         return None, None, None, None
 
@@ -175,7 +175,9 @@ def draw_ellipsoid(P, q, r, outside_pts, inside_pts):
                    c='red')
         ax.scatter(inside_pts[:, 0], inside_pts[:, 1], inside_pts[:, 2], s=20,
                    c='green')
-        ax.axis('equal')
+        if dim == 2:
+            # 3D plot doesn't support equal axis yet. Only 2D plot can.
+            ax.axis('equal')
         plt.show()
 
 
@@ -231,7 +233,7 @@ class FindLargeEllipsoid:
         # terminate the search.
         self.num_sample_pts = 20
 
-    def search(self, max_iterations, volume_increase_tol):
+    def search(self, max_iterations, volume_increase_tol, *, verbose=False):
         """
         Search the ellipsoid until either hitting the max_iterations, or the
         increase in the volume is smaller than volume_increase_tol.
@@ -247,7 +249,7 @@ class FindLargeEllipsoid:
         candidate_pt = centered_sample_from_convex_hull(self.pts)
         inside_pts = candidate_pt.reshape((1, -1))
         P, q, r, lambda_val = find_ellipsoid(self.pts, inside_pts, self.A,
-                                             self.b)
+                                             self.b, verbose=verbose)
         if P is None:
             raise Exception("Failed in the first iteration. Check which " +
                             "solver is used. I highly recommend installing" +
