@@ -18,11 +18,12 @@ def get_hull(pts):
 def compute_ellipsoid_volume(P, q, r):
     """
     The volume of the ellipsoid xᵀPx + 2qᵀx ≤ r is proportional to
-    power((r + qᵀP⁻¹q)/ det(P)), dim/2)
+    power(r + qᵀP⁻¹q, dim/2) / sqrt(det(P))
     We return this number.
     """
-    return np.power((r + q @ np.linalg.solve(P, q)) / \
-        np.linalg.det(P), P.shape[0] / 2)
+    dim = P.shape[0]
+    return np.power((r + q @ np.linalg.solve(P, q)), dim / 2)/\
+        np.sqrt(np.linalg.det(P))
 
 
 def uniform_sample_from_convex_hull(deln, dim, n):
