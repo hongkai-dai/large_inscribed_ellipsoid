@@ -1,0 +1,107 @@
+\documentclass{article}
+\usepackage{amsmath, amsfonts, fullpage}
+\title{Finding large inscribed ellipsoid}
+\author{Hongkai Dai}
+
+\begin{document}
+\maketitle
+\section{Problem statement}
+Given many points $v_1, \hdots, v_m\in\mathbb{R}^n$, we want to find a large ellipsoid in the convex hull $ConvexHull(v_1,\hdots, v_m)$, and the ellipsoid doesn't contain any of the point $v_1,\hdots,v_m$.
+\section{Approach}
+We consider to parameterize the ellipsoid as
+\begin{align}
+	\mathcal{E} = \{x | x^TPx + 2q^Tx < r\}
+\end{align}
+The unknowns are $P, q, r$.
+
+The condition that the ellipsoid doesn't contain any of the point $v_1,\hdots, v_m$ is the following linear constraint on $P, q, r$
+\begin{align}
+	v_i\notin\mathcal{E}\Leftrightarrow v_i^TPv_i+2q^Tv_i\ge r
+\end{align}
+
+If we write the convex hull of the points $v_1,\hdots, v_m$ as the polytope
+\begin{align}
+	ConvexHull(v_1,\hdots, v_m) = \{x | Cx\le d\}
+\end{align}
+Then using s-lemma \cite{polik2007survey}, we know that the ellipsoid is within this convex hull if and only if
+\begin{align}
+	\mathcal{E}\subset ConvexHull(v_1,\hdots, v_m)\\
+	\Leftrightarrow \exists \lambda_i \ge 0, \text{s.t} \begin{bmatrix} P  & q-\frac{1}{2}\lambda_i c_i\\
+		(q-\frac{1}{2}\lambda_i c_i)^T & \lambda_id_i-r\end{bmatrix}\succeq 0
+\end{align}
+where $c_i, d_i$ is the i'th row of $C, d$ respectively. $\succeq 0 $ means the matrix on the left hand side is positive semidefinite.
+
+To guarantee that the quadratic function $x^TPx + 2q^Tx\le r$ actually describes an ellipsoid (not other shapes like a hyperbola), we require the following two conditions
+\begin{subequations}
+\begin{align}
+	P \succeq 0\\
+	\exists z, s.t\; z^TPz + 2q^Tz \le r\label{eq:z_in_ellipsoid}
+\end{align}
+\end{subequations}
+Namely \eqref{eq:z_in_ellipsoid} demands that there exists a point $z$ such that $z\in\mathcal{E}$.
+
+The volume of the ellipsoid is proportional to this quantity
+\begin{align}
+	\text{volume}(\mathcal{E})\propto \frac{(r + q^TP^{-1}q)^{n/2}}{\sqrt{\det{(P)}}}
+\end{align}
+where $n$ is the dimensionality of the geometries.
+
+To maximize the ellipsoid volume, we can maximize the logarithm of this function
+\begin{align}
+	\max\; n\log(r+q^TP^{-1}q) - \log \det(P)
+\end{align}
+
+So finding the largest inscribed ellipsoid can be formulated as the following optimization problem
+\begin{subequations}
+\begin{align}
+	\max_{P, q, r, \lambda}\; n\log(r+q^TP^{-1}q) - \log det(P)\label{eq:nonconvex_objective1}\\
+	\text{s.t } v_i^TPv_i + 2q^Tv_i\ge r,\;\forall i=1,..., m\\
+	\lambda \ge 0\\
+	\begin{bmatrix}
+P  & q-\frac{1}{2}\lambda_i c_i\\
+		(q-\frac{1}{2}\lambda_i c_i)^T & \lambda_id_i-r
+	\end{bmatrix}\succeq 0\\
+	P\succeq 0\\
+	z^TPz + 2q^Tz\le r
+\end{align}
+\label{eq:nonconvex_optimization}
+\end{subequations}
+we will specify and fix the point $z$ in this program. As you can see, all of the constraints are convex constraints. The only nonconvexity is in the objective function.
+
+\subsection{maximizing volume through approximation}
+To solve the optimization problem in \eqref{eq:nonconvex_optimization} through convex optimization, we have to convert the objective function \eqref{eq:nonconvex_objective1} to a concave function (maximizing a concave function can be handled in convex optimization). First we notice that the term $r + q^TP^{-1}q$ is not a linear function of the decision variable $P, q, r$, but it can be regarded the \textit{Schur complement} of another matrix, namely 
+\begin{align}
+	\det(-P)\det(r+q^TP^{-1}q) = \det\left(\begin{bmatrix}r & q^T\\q & -P\end{bmatrix}\right)
+\end{align}
+where we use the property of the \textit{Schur complement}. Hence the objective function can be re-written as
+\begin{subequations}
+\begin{align}
+	\max n \log\det\left(\begin{bmatrix} r & q^T\\q & -P\end{bmatrix}\right) - (n+1) \log\det(P) \text{ if $n$ is even}\\
+	\max n \log-\det\left(\begin{bmatrix} r & q^T\\q & -P\end{bmatrix}\right) - (n+1) \log\det(P) \text{ if $n$ is odd}
+\end{align}
+\label{eq:nonconvex_objective2}
+\end{subequations}
+Now in this new objective function \eqref{eq:nonconvex_objective2} all the terms inside determinant functions are linear w.r.t $P, q, r$. But still the objective function is not a concave function of $P, q, r$ because the log-determinant function.
+
+To resolve this, we consider to take the linear approximation of the nonlinear non-concave objective by using the gradient of the log-dterminant function. We know that
+\begin{align}
+	\frac{\partial \log\det(X)}{\partial X} = X^{-1} \text{ if } \det(X) > 0, X=X^T\\
+	\frac{\partial \log-\det(X)}{\partial X} = X^{-1} \text{ if } \det(X) < 0, X=X^T
+\end{align}
+
+So our general idea is to solve the non-convex optimization problem \eqref{eq:nonconvex_optimization} iteratively. In each iteration we linearize the objective \eqref{eq:nonconvex_objective1} and solve the convex optimization problem within a trust region. In the next section, I will explain this idea to iteratively maximize the ellipsoid volume through trust region method.
+
+\subsection{Trust-region based method}
+First let's assume that at iteration $k$, we have the value $P^{(k)}, q^{(k)}, r^{(k)}$, we linearize the objective function \eqref{eq:nonconvex_objective1} as
+\begin{align}
+	\max_{P^{(k+1)}, q^{(k+1)}, r^{(k+1)}} n\text{Tr}\left(\begin{bmatrix}r^{(k)} &(q^{(k)})^T\\q^{(k)} & -P^{(k)}\end{bmatrix}^{-1}\begin{bmatrix} r^{(k+1)} & (q^{(k+1)})^T\\q^{(k+1)} & -P^{(k+1)}\end{bmatrix}\right) - (n+1)\text{Tr}\left((P^{(k)})^{-1} P^{(k+1)}\right)
+	\label{eq:linearized_objective}
+\end{align}
+We want to stay in the region where this linearized objective \eqref{eq:linearized_objective} remains a good approximation of the original nonlinear objective \eqref{eq:nonconvex_objective1}. To this end, we add a trust-region constraint
+\begin{align}
+	\text{Tr}((P^{(k+1)} - P^{(k)})^T(P^{(k+1)} - P^{(k)})) + (q^{(k+1)} - q^{(k)})^T(q^{(k+1)}-q^{(k)}) + (r^{(k+1)}-r^{(k)})^2\le\Delta
+\end{align}
+
+\bibliographystyle{plain}
+\bibliography{formulation}
+\end{document}
