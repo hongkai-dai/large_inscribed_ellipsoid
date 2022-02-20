@@ -83,7 +83,7 @@ where we use the property of the \textit{Schur complement}. Hence the objective 
 \end{subequations}
 Now in this new objective function \eqref{eq:nonconvex_objective2} all the terms inside determinant functions are linear w.r.t $P, q, r$. But still the objective function is not a concave function of $P, q, r$ because the log-determinant function.
 
-To resolve this, we consider to take the linear approximation of the nonlinear non-concave objective by using the gradient of the log-dterminant function. We know that
+To resolve this, we consider to take the linear approximation of the nonlinear non-concave objective by using the gradient of the log-determinant function. We know that
 \begin{align}
 	\frac{\partial \log\det(X)}{\partial X} = X^{-1} \text{ if } \det(X) > 0, X=X^T\\
 	\frac{\partial \log-\det(X)}{\partial X} = X^{-1} \text{ if } \det(X) < 0, X=X^T
@@ -91,16 +91,13 @@ To resolve this, we consider to take the linear approximation of the nonlinear n
 
 So our general idea is to solve the non-convex optimization problem \eqref{eq:nonconvex_optimization} iteratively. In each iteration we linearize the objective \eqref{eq:nonconvex_objective1} and solve the convex optimization problem within a trust region. In the next section, I will explain this idea to iteratively maximize the ellipsoid volume through trust region method.
 
-\subsection{Trust-region based method}
+\subsection{Sequential convex optimization}
 First let's assume that at iteration $k$, we have the value $P^{(k)}, q^{(k)}, r^{(k)}$, we linearize the objective function \eqref{eq:nonconvex_objective1} as
 \begin{align}
 	\max_{P^{(k+1)}, q^{(k+1)}, r^{(k+1)}} n\text{Tr}\left(\begin{bmatrix}r^{(k)} &(q^{(k)})^T\\q^{(k)} & -P^{(k)}\end{bmatrix}^{-1}\begin{bmatrix} r^{(k+1)} & (q^{(k+1)})^T\\q^{(k+1)} & -P^{(k+1)}\end{bmatrix}\right) - (n+1)\text{Tr}\left((P^{(k)})^{-1} P^{(k+1)}\right)
 	\label{eq:linearized_objective}
 \end{align}
-We want to stay in the region where this linearized objective \eqref{eq:linearized_objective} remains a good approximation of the original nonlinear objective \eqref{eq:nonconvex_objective1}. To this end, we add a trust-region constraint
-\begin{align}
-	\text{Tr}((P^{(k+1)} - P^{(k)})^T(P^{(k+1)} - P^{(k)})) + (q^{(k+1)} - q^{(k)})^T(q^{(k+1)}-q^{(k)}) + (r^{(k+1)}-r^{(k)})^2\le\Delta
-\end{align}
+Now that we have this linearized objective function \eqref{eq:linearized_objective}, we can consider to solve a sequence of convex optimization programs. At each iteration we linearize the objective function at certain point (for example the solution in the previous iteration) and update the ellipsoid based on the solution to the convex program.
 
 \bibliographystyle{plain}
 \bibliography{formulation}
