@@ -1,5 +1,5 @@
 \documentclass{article}
-\usepackage{amsmath, amsfonts, fullpage}
+\usepackage{amsmath, amsfonts, fullpage, algorithm, algpseudocode}
 \title{Finding large inscribed ellipsoid}
 \author{Hongkai Dai}
 
@@ -99,6 +99,43 @@ First let's assume that at iteration $k$, we have the value $P^{(k)}, q^{(k)}, r
 \end{align}
 Now that we have this linearized objective function \eqref{eq:linearized_objective}, we can consider to solve a sequence of convex optimization programs. At each iteration we linearize the objective function at certain point (for example the solution in the previous iteration) and update the ellipsoid based on the solution to the convex program.
 
+At the k'th iteration, we consider to solve the following program within a trust region
+\begin{subequations}
+\begin{align}
+	\max_{P, q, r}&\;n\text{Tr}\left(\begin{bmatrix}r^{(k-1)} &(q^{(k-1)})^T\\q^{(k-1)} & -P^{(k-1)}\end{bmatrix}^{-1}\begin{bmatrix} r & q^T\\q & -P\end{bmatrix}\right) - (n+1)\text{Tr}\left((P^{(k-1)})^{-1} P\right)\\
+	\text{s.t }& v_i^TPv_i + 2q^Tv_i\ge r,\;\forall i=1,..., m\\
+		   &\lambda \ge 0\\
+		   &\begin{bmatrix}
+		P  & q-\frac{1}{2}\lambda_i c_i\\
+		(q-\frac{1}{2}\lambda_i c_i)^T & \lambda_id_i-r
+		\end{bmatrix}\succeq 0\\
+		   &P\succeq 0\\
+		   &\left(z^{(k)}\right)^TPz^{(k)} + 2q^Tz^{(k)}\le r\label{eq:point_z_pre_in_ellipsoid}\\
+		   &|P - P^{(k-1)}|^2 + |q - q^{(k-1)}|^2 + (r-r^{(k-1)})^2\le \Delta \label{eq:trust_region}
+\end{align}
+\label{eq:SDP_at_iteration}
+\end{subequations}
+where \eqref{eq:trust_region} is the trust-region constraint that the change on $P, q, r$ should be within a neighbourhood of the previous iterations $P^{(k-1}), q^{(k-1)}, r^{(k-1)}$. In \eqref{eq:point_z_pre_in_ellipsoid}, the point $z^{(k)}$ is a given point computed as the center of the ellipsoid in the previous iteration $\mathcal{E}^{(k-1)} = \{x | x^TP^{(k-1)}x + 2x^Tq^{(k-1)}\le r^{(k-1)}\}$, namely $z^{(k)} = -\left(P^{(k-1)}\right)^{-1/2}q^{(k-1)}$, i.e., the new ellipsoid will contain the center of the previous ellipsoid. I denote the solution to the convex optimization program \eqref{eq:SDP_at_iteration} as $\bar{P}^{(k)}, \bar{q}^{(k)}, \bar{r}^{(k)}$. This solution give a search direction $\bar{P}^{(k)} - P^{(k-1)}, \bar{q}^{(k)}-q^{(k-1)}, \bar{r}^{(k)}-r^{(k-1)}$. We then do a line search to find the appropriate step size, and set $P^{(k)}, q^{(k)}, r^{(k)}$ based on both the search direction and the step size.
+
+Here is the complete algorithm
+\begin{algorithm}
+	\caption{Given points $v_1,\hdots, v_m\in\mathbb{R}^n$, together with the convex hull of these points as $\{x | Cx\le d\}$, the goal is to find a large ellipsoid $\{x | x^TPx + 2q^Tx\le r\}$ contained within the convex hull but not containing any point $v_i, i=1,\hdots, m$. Start with $P^{(0)}, q^{(0)}, r^{(0)}$}
+	\begin{algorithmic}[1]
+		\State $i\gets 0$.
+		\While{not converged}
+		\State $z^{(k)} = -\left(P^{(k-1)}\right)^{-1/2}q^{(k-1)}$
+		\State Solve \eqref{eq:SDP_at_iteration} with solution $\bar{P}^{(k)}, \bar{q}^{(k)}, \bar{r}^{(k)}$.
+		\State Do line search to find the step size $\alpha$ along the direction $[\bar{P}^{(k)}, \bar{q}^{(k)}, \bar{r}^{(k)}] - [P^{(k-1)}, q^{(k-1)}, r^{(k-1)}]$.
+		\State $P^{(k)} \gets P^{(k-1)} + \alpha \left(\bar{P}^{(k)}-P^{(k-1)}\right)$
+		\State $q^{(k)} \gets q^{(k-1)} + \alpha \left(\bar{q}^{(k)}-q^{(k-1)}\right)$
+		\State $r^{(k)} \gets r^{(k-1)} + \alpha \left(\bar{r}^{(k)}-r^{(k-1)}\right)$
+		\State $i\gets i+1$.
+		\EndWhile
+	\end{algorithmic}
+	\label{alg:sequential_sdp}
+\end{algorithm}
+
+At line 4 of Algorithm \ref{alg:sequential_sdp}, we can use different line search algorithm and conditions. The idea is to find the step length such that the original nonlinear cost $n\log(r+q^TP^{-1}q) - \log\det(P)$ is increased.
 \bibliographystyle{plain}
 \bibliography{formulation}
 \end{document}
