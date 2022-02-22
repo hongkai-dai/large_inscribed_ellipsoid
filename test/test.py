@@ -3,6 +3,43 @@ import max_inner_ellipsoid
 import numpy as np
 import unittest
 
+class TestSearchLargeEllipsoid(unittest.TestCase):
+    def test_constructor(self):
+        # 2D case
+        pts = np.array([[-1., -2.],
+                        [2, 3.],
+                        [0, 4.],
+                        [1, 2.]])
+        dut = max_inner_ellipsoid.SearchLargeEllipsoid(pts)
+        self.assertEqual(dut.dim, 2)
+        np.testing.assert_array_less(dut.C @ np.mean(pts, axis=0), dut.d)
+        for i in range(pts.shape[0]):
+            np.testing.assert_array_less(dut.C @ pts[i], dut.d + 1E-6)
+
+    def test_find_initial_ellipsoid(self):
+        # 2D case
+        pts = np.array([[-1, -2],
+                        [-1, 2.],
+                        [1., -2],
+                        [1, 2.]])
+        dut = max_inner_ellipsoid.SearchLargeEllipsoid(pts)
+        P0, q0, r0 = dut._find_initial_ellipsoid(np.array([0., 0.]))
+        # This returned ellipsoid should be x[0]**2 + x[1]**2/4<=1
+        np.testing.assert_allclose(P0, np.diag([1., 0.25]) * r0, atol=1E-6)
+        np.testing.assert_allclose(q0, np.array([0., 0.]) * r0, atol=1E-6)
+
+        pts = np.array([[-1, -2],
+                        [-1, 2.],
+                        [1., -2],
+                        [1, 2.],
+                        [0, 1.]])
+        dut = max_inner_ellipsoid.SearchLargeEllipsoid(pts)
+        P0, q0, r0 = dut._find_initial_ellipsoid(np.array([0., 0.]))
+        # This returned ellipsoid should be x[0]**2 + (x[1]-0.5)**2 / 1.5**2 <= 1
+        np.testing.assert_allclose(P0 / r0, np.diag([1., 1./1.5**2]) / (8.0/9.0), atol=1E-6)
+        np.testing.assert_allclose(q0 / r0, np.array([0, 0.5 / (1.5**2)]) / (8.0/9.0), atol=1E-6)
+
+
 class TestFindEllipsoid(unittest.TestCase):
     def test_feasible(self):
         outside_pts = np.array(

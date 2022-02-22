@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import dirichlet
 from mpl_toolkits.mplot3d import Axes3D  # noqa
+import warnings
 
 
 def get_hull(pts):
@@ -197,6 +198,153 @@ def inside_ellipsoid(pts, P, q, r):
     return np.sum(pts.T * (P @ pts.T), axis=0) + 2 * pts @ q <= r
 
 
+class SearchLargeEllipsoid:
+    """
+    This class finds a large ellipsoid within the convex hull of @p pts but
+    not containing any point in @p pts.
+    It finds such ellipsoid through solving a sequence of semidefinite
+    programming (SDP) problems.
+    Mathematically we formulate the ellipsoid as
+    {x | xᵀPx + 2qᵀx ≤ r}
+    where P, q, r are parameters of the ellipsoid.
+    If we denote the i'th point pts[i] as vᵢ, then the constraint that vᵢ
+    is not in the ellipsoid is
+    vᵢᵀPvᵢ+2qᵀvᵢ ≥ r
+    If we denote the convex hull of @pts as the polytope
+    ConvexHull(pts) = {x | Cx ≤ d},
+    then the constraint that the ellipsoid is within the convex hull is
+    ∃ λᵢ≥ 0, s.t ⌈ P          q−0.5λᵢcᵢ⌉ is positive semidefinite.
+                 ⌊(q−0.5λᵢcᵢ)ᵀ   λᵢdᵢ−r⌋
+    The volume of the ellipsoid is proportional to
+    sqrt((r + qᵀP⁻¹q)ⁿ/det(P)). Maximizing this volume is equivalent to
+    maximizing its logarithm n*log(r + qᵀP⁻¹q) - log(det(P))
+    Hence we can formulate the following optimization problem
+    max n*log(r + qᵀP⁻¹q) - log(det(P))
+    s.t vᵢᵀPvᵢ+2qᵀvᵢ ≥ r
+        ⌈ P          q−0.5λᵢcᵢ⌉ is positive semidefinite.
+        ⌊(q−0.5λᵢcᵢ)ᵀ   λᵢdᵢ−r⌋
+        λᵢ≥ 0
+
+    All the constraints are convex in the decision variables P, q, r, λ.
+    The cost function isn't a concave function, and we will linearize the cost
+    function, and maximize this linearized cost within a trust region in each
+    iteration.
+    """
+    def __init__(self, pts):
+        """
+        Args:
+          pts: pts[i, :] is the i'th point that has to be outside of the
+          ellipsoid.
+        """
+        self.pts = pts
+        self.dim = pts.shape[1]
+        # Compute the convex hull of pts.
+        self.C, self.d, self.hull = get_hull(self.pts)
+        hull_vertices = pts[self.hull.vertices]
+        self.deln = hull_vertices[Delaunay(hull_vertices).simplices]
+
+    def _find_initial_ellipsoid(self, pt: np.ndarray):
+        """
+        Find an ellipsoid around @p pt. This ellipsoid is contained within the
+        convex hull of self.pts and do not contain any of self.pts.
+
+        One way of finding such an ellipsoid is to first find define a polytope
+        as 𝒫₀ = {x | (vᵢ − pt)ᵀx ≤ (vᵢ−pt)ᵀvᵢ}, namely for each vᵢ in self.pts,
+        consider the plane that passes vᵢ whose normal points along the
+        direction of vᵢ-pt. Then compute the maximal ellipsoid {Eu+f | |u|<=1}
+        contained within 𝒫₀. We can compute this ellipsoid through the SDP
+        max log det(E)
+        s.t E is psd
+            |(vᵢ − pt)ᵀE| ≤ (vᵢ−pt)ᵀ(vᵢ−f)
+            |cᵢᵀE|≤ dᵢ − cᵢᵀf
+
+        Args:
+          pt: A seed point. The returned ellipsoid is contained in a polytope
+          𝒫₀, this polytope contains @p pt. But the returned ellipsoid may not
+          contain @p pt.
+        Return:
+          P0, q0, r0. The returned ellipsoid is parameterized as
+          { x | xᵀP₀x + 2q₀ᵀx ≤ r₀}
+        """
+        assert (pt.shape == (self.dim,))
+        assert ((self.C @ pt <= self.d).all())
+        E = cp.Variable((self.dim, self.dim), PSD=True)
+        f = cp.Variable(self.dim)
+        soc_constraints1 = [cp.SOC((self.pts[i] - pt) @ (self.pts[i] - f), E @ (self.pts[i] - pt)) for i in range(self.pts.shape[0])]
+        soc_constraints2 = [cp.SOC(self.d[i] - self.C[i] @ f, self.C[i] @ E) for i in range(self.C.shape[0])]
+        prob = cp.Problem(cp.Maximize(cp.log_det(E)), soc_constraints1 + soc_constraints2)
+        prob.solve()
+        E_val = E.value
+        f_val = f.value
+        P0 = np.linalg.inv(E_val.T @ E_val)
+        q0 = -P0 @ f_val
+        r0 = 1 - f_val.dot(P0 @ f_val)
+        return P0, q0, r0
+
+
+    def _search_within_region(self, P_curr, q_curr, r_curr, delta):
+        """
+        Solve the original optimization problem with a linear approximation of
+        the objective (where we linearize the objective arround P_curr,
+        q_curr, r_curr), and within a trust region of radius delta.
+        """
+        constraints = []
+        P = cp.Variable((self.dim, self.dim), symmetric=True)
+        q = cp.Variable(self.dim)
+        r = cp.Variable()
+
+        # Impose the constraint that v₁, ..., vₙ are all outside of the ellipsoid.
+        for i in range(self.pts.shape[0]):
+            constraints.append(
+                self.pts[i, :] @ (P @ self.pts[i, :]) +
+                2 * q @ self.pts[i, :] >= r)
+        # P is strictly positive definite.
+        epsilon = 1e-6
+        constraints.append(P - epsilon * np.eye(dim) >> 0)
+        # Impose the constraint that the ellipsoid is within the convex hull
+        # of self.pts
+        num_faces = self.C.shape[0]
+        lambda_var = cp.Variable(num_faces)
+        constraints.append(lambda_var >= 0)
+        Q = [None] * num_faces
+        for i in range(num_faces):
+            Q[i] = cp.Variable((self.dim+1, self.dim+1), PSD=True)
+            constraints.append(Q[i][:self.dim, :self.dim] == P)
+            constraints.append(Q[i][:self.dim, self.dim] == q - lambda_var[i] * self.C[i, :]/2)
+            constraints.append(Q[i][-1, -1] == lambda_var[i] * self.d[i] - r)
+
+        # Impose the constraint that this new ellipsoid contains the center of
+        # the previous ellipsoid.
+        ellipsoid_center_curr = -np.linalg.solve(P_curr, q_curr)
+        constraints.append(
+            ellipsoid_center_curr @ (P @ ellipsoid_center_curr)
+            + 2 * q @ ellipsoid_center_curr >= r)
+
+        # Impose the trust region constraint
+        # |P - P_curr|² + |q - q_curr|² + |r-r_curr|² <= delta
+        if (not np.isinf(delta)):
+            assert (delta > 0)
+            constraints.append(np.trace((P - P_curr).T @ (P-P_curr)) + (q-q_curr).dot(q-q_curr) + (r-r_curr)**2 <= delta)
+
+        # Now add the linearized objective
+        # n * trace([r_curr q_currᵀ]⁻¹ * [r qᵀ]) - (n+1) * trace(P_curr⁻¹*P)
+        #           [q_curr -P_curr]     [q -P]
+        # Denote X = [r_curr q_currᵀ]
+        #            [q_curr -P_curr]
+        X = np.empty((self.dim+1, self.dim+1))
+        X[0, 0] = r_curr
+        X[0, 1:] = q_curr.T
+        X[1:, 0] = q_curr
+        X[1:, 1:] = -P_curr
+        X_inv = np.linalg.inv(X)
+        objective = self.dim * (X_inv[0, 0] * r + 2 * X_inv[0, 1:].dot(q) +
+                                np.trace(X_inv[1:, 1:] @ (-P))) -\
+            (self.dim + 1) * np.trace(np.linalg.inv(P_curr)  @ P)
+        prob = cp.Problem(cp.Maximize(objective), constraints)
+        prob.solve()
+
+
+
 class FindLargeEllipsoid:
     """
     We find a large ellipsoid within the convex hull of @p pts but not
@@ -223,6 +371,7 @@ class FindLargeEllipsoid:
     parameterized as {x | xᵀPx + 2qᵀx ≤ r }
     """
     def __init__(self, pts):
+        # warnings.warn("This class finds a large inscribed ellipsoid through a stochastic procedure. It is better to use the class SearchLargeEllipsoid which is deterministic")
         self.pts = pts
         self.dim = self.pts.shape[1]
         self.A, self.b, self.hull = get_hull(self.pts)
