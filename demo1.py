@@ -1,6 +1,7 @@
 import max_inner_ellipsoid
 import numpy as np
 
+
 def demo2D():
     pts = np.array([[0., 0.], [0., 1.], [1., 1.], [1., 0.], [0.2, 0.4]])
     max_iterations = 10

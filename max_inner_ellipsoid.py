@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import dirichlet
 from mpl_toolkits.mplot3d import Axes3D  # noqa
-import warnings
+# import warnings
 
 
 def get_hull(pts):
@@ -23,7 +23,7 @@ def compute_ellipsoid_volume(P, q, r):
     We return this number.
     """
     dim = P.shape[0]
-    return np.power((r + q @ np.linalg.solve(P, q)), dim / 2)/\
+    return np.power((r + q @ np.linalg.solve(P, q)), dim / 2) /\
         np.sqrt(np.linalg.det(P))
 
 
@@ -39,7 +39,7 @@ def uniform_sample_from_convex_hull(deln, dim, n):
     sample = np.random.choice(len(vols), size=n, p=vols / vols.sum())
 
     return np.einsum('ijk, ij -> ik', deln[sample],
-                     dirichlet.rvs([1]*(dim + 1), size=n))
+                     dirichlet.rvs([1] * (dim + 1), size=n))
 
 
 def centered_sample_from_convex_hull(pts):
@@ -75,10 +75,10 @@ def find_ellipsoid(outside_pts, inside_pts, A, b, *, verbose=False):
     hull Ax <= b. If the problem is infeasible, then returns
     None, None, None, None
     """
-    assert(isinstance(outside_pts, np.ndarray))
+    assert (isinstance(outside_pts, np.ndarray))
     (num_outside_pts, dim) = outside_pts.shape
-    assert(isinstance(inside_pts, np.ndarray))
-    assert(inside_pts.shape[1] == dim)
+    assert (isinstance(inside_pts, np.ndarray))
+    assert (inside_pts.shape[1] == dim)
     num_inside_pts = inside_pts.shape[0]
 
     constraints = []
@@ -88,18 +88,16 @@ def find_ellipsoid(outside_pts, inside_pts, A, b, *, verbose=False):
 
     # Impose the constraint that v₁, ..., vₙ are all outside of the ellipsoid.
     for i in range(num_outside_pts):
-        constraints.append(
-            outside_pts[i, :] @ (P @ outside_pts[i, :]) +
-            2 * q @ outside_pts[i, :] >= r)
+        constraints.append(outside_pts[i, :] @ (P @ outside_pts[i, :]) +
+                           2 * q @ outside_pts[i, :] >= r)
     # P is strictly positive definite.
     epsilon = 1e-6
     constraints.append(P - epsilon * np.eye(dim) >> 0)
 
     # Add the constraint that the ellipsoid contains @p inside_pts.
     for i in range(num_inside_pts):
-        constraints.append(
-            inside_pts[i, :] @ (P @ inside_pts[i, :]) +
-            2 * q @ inside_pts[i, :] <= r)
+        constraints.append(inside_pts[i, :] @ (P @ inside_pts[i, :]) +
+                           2 * q @ inside_pts[i, :] <= r)
 
     # Now add the constraint that the ellipsoid is in the convex hull Ax<=b.
     # Using s-lemma, we know that the constraint is
@@ -111,9 +109,9 @@ def find_ellipsoid(outside_pts, inside_pts, A, b, *, verbose=False):
     constraints.append(lambda_var >= 0)
     Q = [None] * num_faces
     for i in range(num_faces):
-        Q[i] = cp.Variable((dim+1, dim+1), PSD=True)
+        Q[i] = cp.Variable((dim + 1, dim + 1), PSD=True)
         constraints.append(Q[i][:dim, :dim] == P)
-        constraints.append(Q[i][:dim, dim] == q - lambda_var[i] * A[i, :]/2)
+        constraints.append(Q[i][:dim, dim] == q - lambda_var[i] * A[i, :] / 2)
         constraints.append(Q[i][-1, -1] == lambda_var[i] * b[i] - r)
 
     prob = cp.Problem(cp.Minimize(0), constraints)
@@ -142,7 +140,7 @@ def draw_ellipsoid(P, q, r, outside_pts, inside_pts):
     fig = plt.figure()
     dim = P.shape[0]
     L = scipy.linalg.sqrtm(P)
-    radius = np.sqrt(r + q@(np.linalg.solve(P, q)))
+    radius = np.sqrt(r + q @ (np.linalg.solve(P, q)))
     if dim == 2:
         # first compute the points on the unit sphere
         theta = np.linspace(0, 2 * np.pi, 200)
@@ -158,14 +156,14 @@ def draw_ellipsoid(P, q, r, outside_pts, inside_pts):
         plt.show()
     if dim == 3:
         u = np.linspace(0, np.pi, 30)
-        v = np.linspace(0, 2*np.pi, 30)
+        v = np.linspace(0, 2 * np.pi, 30)
 
         sphere_pts_x = np.outer(np.sin(u), np.sin(v))
         sphere_pts_y = np.outer(np.sin(u), np.cos(v))
         sphere_pts_z = np.outer(np.cos(u), np.ones_like(v))
-        sphere_pts = np.vstack((
-            sphere_pts_x.reshape((1, -1)), sphere_pts_y.reshape((1, -1)),
-            sphere_pts_z.reshape((1, -1))))
+        sphere_pts = np.vstack((sphere_pts_x.reshape(
+            (1, -1)), sphere_pts_y.reshape(
+                (1, -1)), sphere_pts_z.reshape((1, -1))))
         ellipsoid_pts = np.linalg.solve(
             L, radius * sphere_pts - (np.linalg.solve(L, q)).reshape((3, -1)))
         ax = plt.axes(projection='3d')
@@ -173,9 +171,14 @@ def draw_ellipsoid(P, q, r, outside_pts, inside_pts):
         ellipsoid_pts_y = ellipsoid_pts[1, :].reshape(sphere_pts_y.shape)
         ellipsoid_pts_z = ellipsoid_pts[2, :].reshape(sphere_pts_z.shape)
         ax.plot_wireframe(ellipsoid_pts_x, ellipsoid_pts_y, ellipsoid_pts_z)
-        ax.scatter(outside_pts[:, 0], outside_pts[:, 1], outside_pts[:, 2],
+        ax.scatter(outside_pts[:, 0],
+                   outside_pts[:, 1],
+                   outside_pts[:, 2],
                    c='red')
-        ax.scatter(inside_pts[:, 0], inside_pts[:, 1], inside_pts[:, 2], s=20,
+        ax.scatter(inside_pts[:, 0],
+                   inside_pts[:, 1],
+                   inside_pts[:, 2],
+                   s=20,
                    c='green')
         if dim == 2:
             # 3D plot doesn't support equal axis yet. Only 2D plot can.
@@ -266,13 +269,20 @@ class SearchLargeEllipsoid:
           P0, q0, r0. The returned ellipsoid is parameterized as
           { x | xᵀP₀x + 2q₀ᵀx ≤ r₀}
         """
-        assert (pt.shape == (self.dim,))
+        assert (pt.shape == (self.dim, ))
         assert ((self.C @ pt <= self.d).all())
         E = cp.Variable((self.dim, self.dim), PSD=True)
         f = cp.Variable(self.dim)
-        soc_constraints1 = [cp.SOC((self.pts[i] - pt) @ (self.pts[i] - f), E @ (self.pts[i] - pt)) for i in range(self.pts.shape[0])]
-        soc_constraints2 = [cp.SOC(self.d[i] - self.C[i] @ f, self.C[i] @ E) for i in range(self.C.shape[0])]
-        prob = cp.Problem(cp.Maximize(cp.log_det(E)), soc_constraints1 + soc_constraints2)
+        soc_constraints1 = [
+            cp.SOC((self.pts[i] - pt) @ (self.pts[i] - f),
+                   E @ (self.pts[i] - pt)) for i in range(self.pts.shape[0])
+        ]
+        soc_constraints2 = [
+            cp.SOC(self.d[i] - self.C[i] @ f, self.C[i] @ E)
+            for i in range(self.C.shape[0])
+        ]
+        prob = cp.Problem(cp.Maximize(cp.log_det(E)),
+                          soc_constraints1 + soc_constraints2)
         prob.solve()
         E_val = E.value
         f_val = f.value
@@ -280,7 +290,6 @@ class SearchLargeEllipsoid:
         q0 = -P0 @ f_val
         r0 = 1 - f_val.dot(P0 @ f_val)
         return P0, q0, r0
-
 
     def _search_within_region(self, P_curr, q_curr, r_curr, delta):
         """
@@ -293,14 +302,14 @@ class SearchLargeEllipsoid:
         q = cp.Variable(self.dim)
         r = cp.Variable()
 
-        # Impose the constraint that v₁, ..., vₙ are all outside of the ellipsoid.
+        # Impose the constraint that v₁, ..., vₙ are all outside of the
+        # ellipsoid.
         for i in range(self.pts.shape[0]):
-            constraints.append(
-                self.pts[i, :] @ (P @ self.pts[i, :]) +
-                2 * q @ self.pts[i, :] >= r)
+            constraints.append(self.pts[i, :] @ (P @ self.pts[i, :]) +
+                               2 * q @ self.pts[i, :] >= r)
         # P is strictly positive definite.
         epsilon = 1e-6
-        constraints.append(P - epsilon * np.eye(dim) >> 0)
+        constraints.append(P - epsilon * np.eye(self.dim) >> 0)
         # Impose the constraint that the ellipsoid is within the convex hull
         # of self.pts
         num_faces = self.C.shape[0]
@@ -308,30 +317,33 @@ class SearchLargeEllipsoid:
         constraints.append(lambda_var >= 0)
         Q = [None] * num_faces
         for i in range(num_faces):
-            Q[i] = cp.Variable((self.dim+1, self.dim+1), PSD=True)
+            Q[i] = cp.Variable((self.dim + 1, self.dim + 1), PSD=True)
             constraints.append(Q[i][:self.dim, :self.dim] == P)
-            constraints.append(Q[i][:self.dim, self.dim] == q - lambda_var[i] * self.C[i, :]/2)
+            constraints.append(Q[i][:self.dim, self.dim] == q -
+                               lambda_var[i] * self.C[i, :] / 2)
             constraints.append(Q[i][-1, -1] == lambda_var[i] * self.d[i] - r)
 
         # Impose the constraint that this new ellipsoid contains the center of
         # the previous ellipsoid.
         ellipsoid_center_curr = -np.linalg.solve(P_curr, q_curr)
         constraints.append(
-            ellipsoid_center_curr @ (P @ ellipsoid_center_curr)
-            + 2 * q @ ellipsoid_center_curr >= r)
+            ellipsoid_center_curr @ (P @ ellipsoid_center_curr) +
+            2 * q @ ellipsoid_center_curr >= r)
 
         # Impose the trust region constraint
         # |P - P_curr|² + |q - q_curr|² + |r-r_curr|² <= delta
         if (not np.isinf(delta)):
             assert (delta > 0)
-            constraints.append(np.trace((P - P_curr).T @ (P-P_curr)) + (q-q_curr).dot(q-q_curr) + (r-r_curr)**2 <= delta)
+            constraints.append(
+                np.trace((P - P_curr).T @ (P - P_curr)) +
+                (q - q_curr).dot(q - q_curr) + (r - r_curr)**2 <= delta)
 
         # Now add the linearized objective
         # n * trace([r_curr q_currᵀ]⁻¹ * [r qᵀ]) - (n+1) * trace(P_curr⁻¹*P)
         #           [q_curr -P_curr]     [q -P]
         # Denote X = [r_curr q_currᵀ]
         #            [q_curr -P_curr]
-        X = np.empty((self.dim+1, self.dim+1))
+        X = np.empty((self.dim + 1, self.dim + 1))
         X[0, 0] = r_curr
         X[0, 1:] = q_curr.T
         X[1:, 0] = q_curr
@@ -342,7 +354,6 @@ class SearchLargeEllipsoid:
             (self.dim + 1) * np.trace(np.linalg.inv(P_curr)  @ P)
         prob = cp.Problem(cp.Maximize(objective), constraints)
         prob.solve()
-
 
 
 class FindLargeEllipsoid:
@@ -371,7 +382,9 @@ class FindLargeEllipsoid:
     parameterized as {x | xᵀPx + 2qᵀx ≤ r }
     """
     def __init__(self, pts):
-        # warnings.warn("This class finds a large inscribed ellipsoid through a stochastic procedure. It is better to use the class SearchLargeEllipsoid which is deterministic")
+        # warnings.warn("This class finds a large inscribed ellipsoid " +
+        # "through a stochastic procedure. It is better to use the class " +
+        # "SearchLargeEllipsoid which is deterministic")
         self.pts = pts
         self.dim = self.pts.shape[1]
         self.A, self.b, self.hull = get_hull(self.pts)
@@ -398,17 +411,19 @@ class FindLargeEllipsoid:
         # hull.
         candidate_pt = centered_sample_from_convex_hull(self.pts)
         inside_pts = candidate_pt.reshape((1, -1))
-        P, q, r, lambda_val = find_ellipsoid(self.pts, inside_pts, self.A,
-                                             self.b, verbose=verbose)
+        P, q, r, lambda_val = find_ellipsoid(self.pts,
+                                             inside_pts,
+                                             self.A,
+                                             self.b,
+                                             verbose=verbose)
         if P is None:
             raise Exception("Failed in the first iteration. Check which " +
                             "solver is used. I highly recommend installing" +
                             " Mosek solver, as the default solver (SCS) " +
                             "coming with CVXPY often fails due to " +
                             "numerical issues.")
-        return self.search_from(
-            P, q, r, self.pts, inside_pts, max_iterations-1,
-            volume_increase_tol)
+        return self.search_from(P, q, r, self.pts, inside_pts,
+                                max_iterations - 1, volume_increase_tol)
 
     def search_from(self, P, q, r, outside_pts, inside_pts, max_iterations,
                     volume_increase_tol):
@@ -437,8 +452,8 @@ class FindLargeEllipsoid:
             # Now take a new sample that is outside of the ellipsoid.
             sample_pts = uniform_sample_from_convex_hull(
                 self.deln, self.dim, self.num_sample_pts)
-            is_in_ellipsoid = inside_ellipsoid(
-                sample_pts, P_best, q_best, r_best)
+            is_in_ellipsoid = inside_ellipsoid(sample_pts, P_best, q_best,
+                                               r_best)
             if np.all(is_in_ellipsoid):
                 return P_best, q_best, r_best, outside_pts, inside_pts
             else:
@@ -447,8 +462,8 @@ class FindLargeEllipsoid:
                 # inside_pts and z.
                 candidate_pt = sample_pts[np.where(~is_in_ellipsoid)[0][0], :]
                 P, q, r, lambda_val = find_ellipsoid(
-                    outside_pts, np.vstack((inside_pts, candidate_pt)),
-                    self.A, self.b)
+                    outside_pts, np.vstack((inside_pts, candidate_pt)), self.A,
+                    self.b)
                 if P is None:
                     # Cannot find the ellipsoid that covers both inside_pts
                     # and candidate_pt. Add candidate_pt to outside_pts.
