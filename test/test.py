@@ -1,7 +1,31 @@
 import max_inner_ellipsoid
 
 import numpy as np
+import cvxpy as cp
 import unittest
+
+
+def check_inscribed_ellipsoid(P, q, r, vertices, C, d, tol):
+    # Check if the ellipsoid {x | xᵀPx+2qᵀx≤r} is contained within Cx<=d and
+    # doesn't contain any row of vertices.
+    np.testing.assert_array_less(
+        r - tol,
+        np.sum(vertices.T * (P @ (vertices.T)), axis=0) + 2 * q @ (vertices.T))
+    # Now write the ellipsoid as {Eu+f | |u|<=1}.
+    # The ellipsoid xᵀPx+2qᵀx≤r can be written as
+    # |(P_chol*x + P_chol⁻ᵀ*q) / sqrt(r + qᵀP⁻¹q)| <= 1
+    # If we compare the terms, we have
+    # E⁻¹ = P_chol / sqrt(r+qᵀP⁻¹q)
+    # E⁻¹f = -P_chol⁻ᵀ*q/sqrt(r + qᵀP⁻¹q)
+    radius = np.sqrt(r + q.dot(np.linalg.solve(P, q)))
+    # P_chol.T @ P_chol = P
+    P_chol = np.linalg.cholesky(P).T
+    E = np.linalg.inv(P_chol / radius)
+    f = -E @ (np.linalg.solve(P_chol.T, q) / radius)
+    # The ellipsoid {Eu+f | |u|<=1} is within the halfspace
+    # {x|cᵢᵀx <= dᵢ} iff |cᵢᵀE| + cᵢᵀf ≤ dᵢ
+    np.testing.assert_array_less(
+        np.linalg.norm(C @ E, axis=1) + C @ f, d + tol)
 
 
 class TestSearchLargeEllipsoid(unittest.TestCase):
@@ -35,6 +59,44 @@ class TestSearchLargeEllipsoid(unittest.TestCase):
         np.testing.assert_allclose(q0 / r0,
                                    np.array([0, 0.5 / (1.5**2)]) / (8.0 / 9.0),
                                    atol=1E-6)
+        # Now check if the returned P0, q0, r0 satsify our constraints for
+        # search_around.
+        constraints = []
+        P = cp.Variable((2, 2), symmetric=True)
+        q = cp.Variable(2)
+        r = cp.Variable()
+        for i in range(pts.shape[0]):
+            constraints.append(
+                pts[i, :] @ (P @ pts[i, :]) + 2 * q @ pts[i, :] >= r)
+        for i in range(dut.C.shape[0]):
+            face_constraints, _ = \
+                max_inner_ellipsoid.add_ellipsoid_inside_halfspace(
+                    P, q, r, dut.C[i], dut.d[i])
+            constraints.extend(face_constraints)
+        constraints.append(P == P0)
+        constraints.append(q == q0)
+        constraints.append(r == r0)
+        prob = cp.Problem(cp.Maximize(0), constraints)
+        prob.solve()
+        self.assertEqual(prob.status, "optimal")
+
+    def test_search_around(self):
+        # A 2D example
+        pts = np.array([[-1, -2.], [1., -2.], [-1., 2.], [1., 2.], [0, 1.]])
+        dut = max_inner_ellipsoid.SearchLargeEllipsoid(pts)
+        P0, q0, r0 = dut._find_initial_ellipsoid(np.array([0., 0.]))
+        # Use a trust region with different radius
+        for delta in (0.1, 1, 2, np.inf):
+            Pbar1, qbar1, rbar1 = dut._search_around(P0, q0, r0, delta)
+            # Make sure that the new ellipsoid contains z1 as the center for
+            # the old ellipsoid.
+            z1 = -np.linalg.solve(P0, q0)
+            self.assertLessEqual(z1.dot(Pbar1 @ z1) + 2 * qbar1.dot(z1), rbar1)
+            # When delta=inf, the ellipsoid is really badly scaled with bad
+            # numerics, hence we use a very large tolerance.
+            tol = 1E-5
+            check_inscribed_ellipsoid(Pbar1, qbar1, rbar1, pts, dut.C, dut.d,
+                                      tol)
 
 
 class TestFindEllipsoid(unittest.TestCase):

@@ -20,7 +20,8 @@ def compute_ellipsoid_volume(P, q, r):
     """
     The volume of the ellipsoid xᵀPx + 2qᵀx ≤ r is proportional to
     power(r + qᵀP⁻¹q, dim/2) / sqrt(det(P))
-    We return this number.
+    We return this number. Note that the actual volume is this returned number
+    multiplies the volume of a unit sphere, namely power(π, dim/2)/Γ(dim+0.5).
     """
     dim = P.shape[0]
     return np.power((r + q @ np.linalg.solve(P, q)), dim / 2) /\
@@ -201,6 +202,27 @@ def inside_ellipsoid(pts, P, q, r):
     return np.sum(pts.T * (P @ pts.T), axis=0) + 2 * pts @ q <= r
 
 
+def add_ellipsoid_inside_halfspace(P: cp.Variable, q, r, c: np.ndarray,
+                                   d: float):
+    """
+    return the constraints that the ellipsoid {x|xᵀPx + 2qᵀx ≤ r} is within the
+    halfspace cᵀx<=d
+    Mathematically using s-lemma, we get
+       ⌈ P          q−0.5λᵢcᵢ⌉ is positive semidefinite.
+       ⌊(q−0.5λᵢcᵢ)ᵀ   λᵢdᵢ−r⌋
+       λᵢ≥ 0
+    """
+    constraints = []
+    lambda_var = cp.Variable(1)
+    constraints.append(lambda_var >= 0)
+    dim = P.shape[0]
+    Q = cp.Variable((dim + 1, dim + 1), PSD=True)
+    constraints.append(Q[:dim, :dim] == P)
+    constraints.append(Q[:dim, dim] == q - lambda_var * c / 2)
+    constraints.append(Q[-1, -1] == lambda_var * d - r)
+    return constraints, lambda_var
+
+
 class SearchLargeEllipsoid:
     """
     This class finds a large ellipsoid within the convex hull of @p pts but
@@ -245,6 +267,9 @@ class SearchLargeEllipsoid:
         self.C, self.d, self.hull = get_hull(self.pts)
         hull_vertices = pts[self.hull.vertices]
         self.deln = hull_vertices[Delaunay(hull_vertices).simplices]
+        # We will impose the constraint P - P_epsilon * I being psd to make
+        # sure that P is strictly positive definite.
+        self.P_epsilon = 1E-6
 
     def _find_initial_ellipsoid(self, pt: np.ndarray):
         """
@@ -289,9 +314,18 @@ class SearchLargeEllipsoid:
         P0 = np.linalg.inv(E_val.T @ E_val)
         q0 = -P0 @ f_val
         r0 = 1 - f_val.dot(P0 @ f_val)
+        # If P0 - P_epsilon * I is not psd, then scale P0, q0, r0 such that
+        # P0 - P_epsilon * I is psd.
+        P0_eig, _ = np.linalg.eig(P0)
+        P0_eig_min = np.min(P0_eig)
+        if P0_eig_min < self.P_epsilon:
+            factor = self.P_epsilon / P0_eig_min
+            P0 *= factor
+            q0 *= factor
+            r0 *= factor
         return P0, q0, r0
 
-    def _search_within_region(self, P_curr, q_curr, r_curr, delta):
+    def _search_around(self, P_curr, q_curr, r_curr, delta):
         """
         Solve the original optimization problem with a linear approximation of
         the objective (where we linearize the objective arround P_curr,
@@ -307,36 +341,34 @@ class SearchLargeEllipsoid:
         for i in range(self.pts.shape[0]):
             constraints.append(self.pts[i, :] @ (P @ self.pts[i, :]) +
                                2 * q @ self.pts[i, :] >= r)
+        # Note that we can scale P, q, r arbitrarily and still represent the
+        # same ellipsoid.
+        constraints.append(cp.trace(P) == np.trace(P_curr))
         # P is strictly positive definite.
-        epsilon = 1e-6
-        constraints.append(P - epsilon * np.eye(self.dim) >> 0)
+        constraints.append(P - self.P_epsilon * np.eye(self.dim) >> 0)
         # Impose the constraint that the ellipsoid is within the convex hull
         # of self.pts
         num_faces = self.C.shape[0]
-        lambda_var = cp.Variable(num_faces)
-        constraints.append(lambda_var >= 0)
-        Q = [None] * num_faces
         for i in range(num_faces):
-            Q[i] = cp.Variable((self.dim + 1, self.dim + 1), PSD=True)
-            constraints.append(Q[i][:self.dim, :self.dim] == P)
-            constraints.append(Q[i][:self.dim, self.dim] == q -
-                               lambda_var[i] * self.C[i, :] / 2)
-            constraints.append(Q[i][-1, -1] == lambda_var[i] * self.d[i] - r)
+            face_constraints, _ = add_ellipsoid_inside_halfspace(
+                P, q, r, self.C[i], self.d[i])
+            constraints.extend(face_constraints)
 
         # Impose the constraint that this new ellipsoid contains the center of
         # the previous ellipsoid.
         ellipsoid_center_curr = -np.linalg.solve(P_curr, q_curr)
         constraints.append(
             ellipsoid_center_curr @ (P @ ellipsoid_center_curr) +
-            2 * q @ ellipsoid_center_curr >= r)
+            2 * q @ ellipsoid_center_curr <= r)
 
         # Impose the trust region constraint
         # |P - P_curr|² + |q - q_curr|² + |r-r_curr|² <= delta
         if (not np.isinf(delta)):
             assert (delta > 0)
             constraints.append(
-                np.trace((P - P_curr).T @ (P - P_curr)) +
-                (q - q_curr).dot(q - q_curr) + (r - r_curr)**2 <= delta)
+                cp.SOC(np.sqrt(delta),
+                       cp.hstack(
+                           (cp.vec(P - P_curr), q - q_curr, r - r_curr))))
 
         # Now add the linearized objective
         # n * trace([r_curr q_currᵀ]⁻¹ * [r qᵀ]) - (n+1) * trace(P_curr⁻¹*P)
@@ -349,11 +381,13 @@ class SearchLargeEllipsoid:
         X[1:, 0] = q_curr
         X[1:, 1:] = -P_curr
         X_inv = np.linalg.inv(X)
-        objective = self.dim * (X_inv[0, 0] * r + 2 * X_inv[0, 1:].dot(q) +
-                                np.trace(X_inv[1:, 1:] @ (-P))) -\
-            (self.dim + 1) * np.trace(np.linalg.inv(P_curr)  @ P)
+        objective = self.dim * (X_inv[0, 0] * r + 2 * X_inv[0, 1:]@q +
+                                cp.trace(X_inv[1:, 1:] @ (-P))) -\
+            (self.dim + 1) * cp.trace(np.linalg.inv(P_curr)  @ P)
         prob = cp.Problem(cp.Maximize(objective), constraints)
         prob.solve()
+        assert (prob.status == "optimal")
+        return P.value, q.value, r.value
 
 
 class FindLargeEllipsoid:
