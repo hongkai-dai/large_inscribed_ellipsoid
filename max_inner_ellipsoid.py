@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import dirichlet
 from mpl_toolkits.mplot3d import Axes3D  # noqa
-# import warnings
+import warnings
 
 
 def get_hull(pts):
@@ -268,6 +268,9 @@ class SearchLargeEllipsoid:
     The cost function isn't a concave function, and we will linearize the cost
     function, and maximize this linearized cost within a trust region in each
     iteration.
+
+    For the complete explanation on the algorithm, refer to doc/formulation.pdf
+    for more details.
     """
     def __init__(self, pts):
         """
@@ -471,6 +474,52 @@ class SearchLargeEllipsoid:
                 return alpha
             alpha *= rho
 
+    def search(self,
+               seed_point: np.ndarray,
+               max_iterations,
+               convergence_tol,
+               delta=np.inf,
+               c1=1E-4,
+               rho=0.9,
+               alpha_min=1E-3,
+               callback=None) -> (np.ndarray, np.ndarray, float):
+        """
+        Solve a sequence of convex optimization programs to find a large
+        ellipsoid { x | xᵀPx + 2qᵀx≤ r} contained inside the convex hull
+        {x | self.C * x <= self.d} and doesn't touch any point in self.pts.
+        Args:
+          delta: The trust-region size in each convex optimization. We will
+          impose the constraint |Pₙ₊₁ − Pₙ|² + |qₙ₊₁ − qₙ|² + |rₙ₊₁−rₙ|²≤delta
+          as the trust region to find the new ellipsoid with parameter
+          (Pₙ₊₁, qₙ₊₁, rₙ₊₁) within a neighbourhood of the previous ellipsoid
+          parameter (Pₙ, qₙ, rₙ).
+          c1: The positive constant used in Armijo's rule.
+          rho: The backtracking factor used in line search.
+          alpha_min: The minimal step size for line search.
+        Return:
+          P, q, r: the parameterization of the best ellipsoid.
+        """
+        P, q, r = self._find_initial_ellipsoid(seed_point)
+        if callback is not None:
+            callback(P, q, r)
+        objective = self._eval_objective(P, q, r)
+        iter_count = 0
+        while iter_count < max_iterations:
+            Pbar, qbar, rbar = self._search_around(P, q, r, delta)
+            alpha = self._line_search_armijo(P, q, r, Pbar, qbar, rbar, c1,
+                                             rho, alpha_min)
+            P += alpha * (Pbar - P)
+            q += alpha * (qbar - q)
+            r += alpha * (rbar - r)
+            if (callback is not None):
+                callback(P, q, r)
+            new_objective = self._eval_objective(P, q, r)
+            if new_objective - objective < convergence_tol:
+                return P, q, r
+            iter_count += 1
+            objective = new_objective
+        return P, q, r
+
 
 class FindLargeEllipsoid:
     """
@@ -498,9 +547,9 @@ class FindLargeEllipsoid:
     parameterized as {x | xᵀPx + 2qᵀx ≤ r }
     """
     def __init__(self, pts):
-        # warnings.warn("This class finds a large inscribed ellipsoid " +
-        # "through a stochastic procedure. It is better to use the class " +
-        # "SearchLargeEllipsoid which is deterministic")
+        warnings.warn("This class finds a large inscribed ellipsoid " +
+                      "through a stochastic procedure. It is better to use " +
+                      "SearchLargeEllipsoid which is deterministic")
         self.pts = pts
         self.dim = self.pts.shape[1]
         self.A, self.b, self.hull = get_hull(self.pts)
