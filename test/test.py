@@ -98,6 +98,55 @@ class TestSearchLargeEllipsoid(unittest.TestCase):
             check_inscribed_ellipsoid(Pbar1, qbar1, rbar1, pts, dut.C, dut.d,
                                       tol)
 
+    def test_line_search_armijo(self):
+        pts = np.array([[-1, -2.], [1., -2.], [-1., 2.], [1., 2.], [0, 1.]])
+        dut = max_inner_ellipsoid.SearchLargeEllipsoid(pts)
+        sphere_center = np.array([0., 1.5])
+        radius0 = max_inner_ellipsoid.find_inscribed_sphere(
+            pts, dut.C, dut.d, sphere_center)
+        P0 = np.eye(2, 2)
+        q0 = -sphere_center
+        r0 = radius0**2 - sphere_center.dot(sphere_center)
+        # I reduce r0 a little bit so that the initial ellipsoid is not
+        # touching pts, hence Pbar1, qbar1, rbar1 will be different from P0,
+        # q0, r0.
+        r0 -= 0.1
+        for delta in (
+                1,
+                100,
+                np.inf,
+        ):
+            Pbar1, qbar1, rbar1 = dut._search_around(P0, q0, r0, delta)
+            alpha_min = 1E-3
+            c1 = 1E-4
+            alpha = dut._line_search_armijo(P0,
+                                            q0,
+                                            r0,
+                                            Pbar1,
+                                            qbar1,
+                                            rbar1,
+                                            c1,
+                                            rho=0.9,
+                                            alpha_min=alpha_min)
+            self.assertGreaterEqual(alpha, alpha_min)
+            X0 = np.empty((3, 3))
+            X0[0, 0] = r0
+            X0[0, 1:] = q0.T
+            X0[1:, 0] = q0
+            X0[1:, 1:] = -P0
+            Xbar1 = np.empty((3, 3))
+            Xbar1[0, 0] = rbar1
+            Xbar1[0, 1:] = qbar1.T
+            Xbar1[1:, 0] = qbar1
+            Xbar1[1:, 1:] = -Pbar1
+            self.assertGreaterEqual(
+                dut._eval_objective(P0 + alpha * (Pbar1 - P0),
+                                    q0 + alpha * (qbar1 - q0),
+                                    r0 + alpha * (rbar1 - r0)),
+                dut._eval_objective(P0, q0, r0) + c1 * alpha *
+                (dut.dim * np.trace(np.linalg.inv(X0) @ (Xbar1 - X0)) -
+                 (dut.dim + 1) * np.trace(np.linalg.inv(P0) @ (Pbar1 - P0))))
+
 
 class TestFindEllipsoid(unittest.TestCase):
     def test_feasible(self):

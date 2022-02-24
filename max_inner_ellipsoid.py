@@ -202,8 +202,22 @@ def inside_ellipsoid(pts, P, q, r):
     return np.sum(pts.T * (P @ pts.T), axis=0) + 2 * pts @ q <= r
 
 
-def add_ellipsoid_inside_halfspace(P: cp.Variable, q, r, c: np.ndarray,
-                                   d: float):
+def find_inscribed_sphere(vertices, C, d, sphere_center) -> float:
+    """
+    Find the radius of the largest sphere centered at sphere_center. This
+    sphere doesn't touch any @p vertices, and is contained within
+    C * x <= d.
+    """
+    dim = vertices.shape[1]
+    assert (C.shape[1] == dim)
+    radius1 = np.min(np.linalg.norm(vertices - sphere_center, axis=1))
+    assert ((C @ sphere_center <= d).all())
+    radius2 = np.min((d - C @ sphere_center) / (np.linalg.norm(C, axis=1)))
+    return np.min([radius1, radius2])
+
+
+def add_ellipsoid_inside_halfspace(P: cp.Variable, q: cp.Variable,
+                                   r: cp.Variable, c: np.ndarray, d: float):
     """
     return the constraints that the ellipsoid {x|xᵀPx + 2qᵀx ≤ r} is within the
     halfspace cᵀx<=d
@@ -325,7 +339,8 @@ class SearchLargeEllipsoid:
             r0 *= factor
         return P0, q0, r0
 
-    def _search_around(self, P_curr, q_curr, r_curr, delta):
+    def _search_around(self, P_curr, q_curr, r_curr,
+                       delta) -> (np.ndarray, np.ndarray, float):
         """
         Solve the original optimization problem with a linear approximation of
         the objective (where we linearize the objective arround P_curr,
@@ -388,6 +403,73 @@ class SearchLargeEllipsoid:
         prob.solve()
         assert (prob.status == "optimal")
         return P.value, q.value, r.value
+
+    def _eval_objective(self, P: np.ndarray, q: np.ndarray,
+                        r: np.ndarray) -> float:
+        """
+        Compute the nonlinear objective n*log(r+qᵀP⁻¹q)−log(det(P))
+        """
+        return self.dim * np.log(r + q.dot(np.linalg.solve(P, q))) - np.log(
+            np.linalg.det(P))
+
+    def _line_search_armijo(self,
+                            P_curr: np.ndarray,
+                            q_curr: np.ndarray,
+                            r_curr: float,
+                            Pbar: np.ndarray,
+                            qbar: np.ndarray,
+                            rbar: float,
+                            c1=1E-4,
+                            rho=0.9,
+                            alpha_min=1E-3) -> float:
+        """
+        Search the step size α along the direction
+        P_curr + α * (Pbar - P_curr)
+        q_curr + α * (qbar - q_curr)
+        r_curr + α * (rbar - r_curr)
+        to satisfy the Armijo's condition
+        f(x+αp)≥ f(x) + c₁α∇fᵀp (Armijo's rule for sufficient increase)
+        Refer to section 3.1 of Numerical Optimization by Nocedal and Wright.
+        We start with step size α=1, and backtrack as α ← ρα if the Armijo's
+        condition is not satisfied.
+        Args:
+          alpha_min: the smallest value of alpha after backtracking.
+        Return:
+          alpha: the step size after line search.
+        """
+        alpha = 1.
+
+        # Denote X = [r qᵀ]
+        #            [q -P]
+        def get_X(P, q, r):
+            X = np.empty((self.dim + 1, self.dim + 1))
+            X[0, 0] = r
+            X[0, 1:] = q.T
+            X[1:, 0] = q
+            X[1:, 1:] = -P
+            return X
+
+        X_curr = get_X(P_curr, q_curr, r_curr)
+        X_bar = get_X(Pbar, qbar, rbar)
+        # gradient_dot_p is ∇f(x)ᵀp
+        gradient_times_p = self.dim * np.trace(
+            np.linalg.inv(X_curr) @ (X_bar - X_curr)
+        ) - (self.dim + 1) * np.trace(np.linalg.inv(P_curr) @ (Pbar - P_curr))
+
+        f_curr = self._eval_objective(P_curr, q_curr, r_curr)
+        while True:
+            P_candidate = P_curr + alpha * (Pbar - P_curr)
+            q_candidate = q_curr + alpha * (qbar - q_curr)
+            r_candidate = r_curr + alpha * (rbar - r_curr)
+            f_candidate = self._eval_objective(P_candidate, q_candidate,
+                                               r_candidate)
+            armijo_satisfied = f_candidate >= f_curr +\
+                c1 * alpha * gradient_times_p
+            if armijo_satisfied:
+                return alpha
+            if alpha * rho < alpha_min:
+                return alpha
+            alpha *= rho
 
 
 class FindLargeEllipsoid:
