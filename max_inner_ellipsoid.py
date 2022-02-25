@@ -131,14 +131,13 @@ def find_ellipsoid(outside_pts, inside_pts, A, b, *, verbose=False):
         return None, None, None, None
 
 
-def draw_ellipsoid(P, q, r, outside_pts, inside_pts):
+def draw_ellipsoid(ax, P, q, r, outside_pts, inside_pts):
     """
     Draw an ellipsoid defined as {x | xᵀPx + 2qᵀx ≤ r }
     This ellipsoid is equivalent to
     |Lx + L⁻¹q| ≤ √(r + qᵀP⁻¹q)
     where L is the symmetric matrix satisfying L * L = P
     """
-    fig = plt.figure()
     dim = P.shape[0]
     L = scipy.linalg.sqrtm(P)
     radius = np.sqrt(r + q @ (np.linalg.solve(P, q)))
@@ -148,13 +147,13 @@ def draw_ellipsoid(P, q, r, outside_pts, inside_pts):
         sphere_pts = np.vstack((np.cos(theta), np.sin(theta)))
         ellipsoid_pts = np.linalg.solve(
             L, radius * sphere_pts - (np.linalg.solve(L, q)).reshape((2, -1)))
-        ax = fig.add_subplot(111)
         ax.plot(ellipsoid_pts[0, :], ellipsoid_pts[1, :], c='blue')
 
         ax.scatter(outside_pts[:, 0], outside_pts[:, 1], c='red')
         ax.scatter(inside_pts[:, 0], inside_pts[:, 1], s=20, c='green')
         ax.axis('equal')
-        plt.show()
+        # 3D plot doesn't support equal axis yet. Only 2D plot can.
+        ax.axis('equal')
     if dim == 3:
         u = np.linspace(0, np.pi, 30)
         v = np.linspace(0, 2 * np.pi, 30)
@@ -181,10 +180,6 @@ def draw_ellipsoid(P, q, r, outside_pts, inside_pts):
                    inside_pts[:, 2],
                    s=20,
                    c='green')
-        if dim == 2:
-            # 3D plot doesn't support equal axis yet. Only 2D plot can.
-            ax.axis('equal')
-        plt.show()
 
 
 def inside_ellipsoid(pts, P, q, r):
@@ -286,7 +281,7 @@ class SearchLargeEllipsoid:
         self.deln = hull_vertices[Delaunay(hull_vertices).simplices]
         # We will impose the constraint P - P_epsilon * I being psd to make
         # sure that P is strictly positive definite.
-        self.P_epsilon = 1E-6
+        self.P_epsilon = 1E-3
 
     def _find_initial_ellipsoid(self, pt: np.ndarray):
         """

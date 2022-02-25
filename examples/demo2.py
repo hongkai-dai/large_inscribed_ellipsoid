@@ -6,6 +6,7 @@ result with a second search.
 """
 import max_inner_ellipsoid
 import numpy as np
+import matplotlib.pyplot as plt
 
 if __name__ == "__main__":
     pts = np.array([[2262., 0], [2263, 0], [2264, 0], [2265, 0], [2266, 0],
@@ -78,23 +79,23 @@ if __name__ == "__main__":
                     [2305, 102], [2313, 102], [2314, 102], [2315, 102],
                     [2306, 103], [2307, 103], [2312, 103], [2308, 104],
                     [2309, 104], [2310, 104], [2311, 104]])
-    max_iterations = 10
-    volume_increase_tol = 0.01
-    dut = max_inner_ellipsoid.FindLargeEllipsoid(pts)
-    P, q, r, outside_pts, inside_pts = \
-        dut.search(max_iterations, volume_increase_tol)
-    assert (np.all(max_inner_ellipsoid.inside_ellipsoid(inside_pts, P, q, r)))
-    assert (not np.any(max_inner_ellipsoid.inside_ellipsoid(
-        outside_pts, P, q, r)))
-    max_inner_ellipsoid.draw_ellipsoid(P, q, r, pts, inside_pts)
-    # Now we want to search again starting from P, q, r of the previous run.
-    P_new, q_new, r_new, outside_pts_new, inside_pts_new = dut.search_from(
-        P,
-        q,
-        r,
-        outside_pts,
-        inside_pts,
-        max_iterations=10,
-        volume_increase_tol=0.001)
-    max_inner_ellipsoid.draw_ellipsoid(P_new, q_new, r_new, outside_pts_new,
-                                       inside_pts_new)
+
+    pts *= 0.01
+    max_iterations = 30
+    convergence_tol = 0.00001
+    dut = max_inner_ellipsoid.SearchLargeEllipsoid(pts)
+    seed_point = np.mean(pts, axis=0)
+
+    def plot(P_val, q_val, r_val):
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        max_inner_ellipsoid.draw_ellipsoid(ax, P_val, q_val, r_val, pts,
+                                           np.empty((0, 2)))
+        ax.set_title(f"iter={plot.counter}")
+        fig.savefig(f"2d_iter{plot.counter:02d}.png", format="png")
+        plot.counter += 1
+    plot.counter = 0
+
+    P, q, r = \
+        dut.search(seed_point, max_iterations, convergence_tol, delta=np.inf,
+                   callback=plot)

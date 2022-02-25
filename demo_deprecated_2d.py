@@ -1,5 +1,6 @@
 import max_inner_ellipsoid
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 def demo2D():
@@ -9,7 +10,10 @@ def demo2D():
     dut = max_inner_ellipsoid.FindLargeEllipsoid(pts)
     P, q, r, outside_pts, inside_pts = \
         dut.search(max_iterations, volume_increase_tol)
-    max_inner_ellipsoid.draw_ellipsoid(P, q, r, outside_pts, inside_pts)
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    max_inner_ellipsoid.draw_ellipsoid(ax, P, q, r, outside_pts, inside_pts)
+    fig.show()
 
 
 if __name__ == "__main__":
